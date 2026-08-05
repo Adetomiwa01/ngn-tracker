@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>NGN/USD Tracker</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: #ffffff;
+    color: #000000;
+    font-family: Georgia, 'Times New Roman', serif;
+    padding: 40px 24px 80px;
+  }
+  .wrap { max-width: 760px; margin: 0 auto; }
+
+  h1 {
+    font-size: 1.4rem;
+    font-weight: normal;
+    margin: 0 0 4px;
+    border-bottom: 1px solid #000;
+    padding-bottom: 10px;
+  }
+  .sub {
+    font-family: Arial, Helvetica, sans-serif;
+    font-size: 0.8rem;
+    color: #444;
+    margin-bottom: 28px;
+  }
+
+  table.data-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-bottom: 32px;
+    font-family: Arial, Helvetica, sans-serif;
+  }
+  table.data-table th, table.data-table td {
+    border: 1px solid #000;
+    padding: 10px 14px;
+    text-align: left;
+  }
+  table.data-table th {
+    font-size: 0.72rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    background: #f5f5f5;
+    font-weight: bold;
+  }
+  table.data-table td {
+    font-size: 1.1rem;
+  }
+  .up { color: #a00; }
+  .down { color: #060; }
+
+  .section-title {
+    font-family: Arial, Helvetica, sans-serif;
+    font-size: 0.9rem;
+    font-weight: bold;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    border-bottom: 1px solid #000;
+    padding-bottom: 6px;
+    margin-bottom: 4px;
+  }
+  .section-desc {
+    font-family: Arial, Helvetica, sans-serif;
+    font-size: 0.8rem;
+    color: #444;
+    margin-bottom: 16px;
+  }
+
+  #chartBox { border: 1px solid #000; padding: 16px; margin-bottom: 24px; }
+  .legend {
+    font-family: Arial, Helvetica, sans-serif;
+    font-size: 0.75rem;
+    color: #444;
+    margin-top: 10px;
+  }
+  .legend span { margin-right: 20px; }
+
+  #statusLine {
+    font-family: Arial, Helvetica, sans-serif;
+    font-size: 0.8rem;
+    color: #444;
+    margin-bottom: 20px;
+  }
+  #statusLine.error { color: #a00; }
+
+  footer {
+    font-family: Arial, Helvetica, sans-serif;
+    font-size: 0.72rem;
+    color: #666;
+    border-top: 1px solid #ccc;
+    padding-top: 14px;
+    margin-top: 30px;
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>NGN / USD Exchange Rate Tracker</h1>
+  <div class="sub">Data refreshed on a fixed schedule by the server. Reloading this page does not use additional API requests.</div>
+
+  <div id="statusLine">Loading...</div>
+
+  <table class="data-table">
+    <tr>
+      <th>Current Rate</th>
+      <th>Last Data Update</th>
+      <th>7-Reading Average</th>
+      <th>Trend</th>
+    </tr>
+    <tr>
+      <td id="currentRate">&mdash;</td>
+      <td id="lastUpdated">&mdash;</td>
+      <td id="avgRate">&mdash;</td>
+      <td id="trendSignal">&mdash;</td>
+    </tr>
+  </table>
+
+  <div class="section-title">History and Short-Term Projection</div>
+  <div class="section-desc">Solid line: recorded rate. Dashed line: a simple linear projection of the recent trend, for illustration only.</div>
+  <div id="chartBox">
+    <canvas id="rateChart" height="90"></canvas>
+    <div class="legend">
+      <span>&mdash; Recorded</span>
+      <span>&#8211;&#8211; Forecast (naive linear projection)</span>
+    </div>
+  </div>
+
+  <footer>
+    Source: exchangerate.host. Server-cached to stay within the free API tier's monthly request limit.
+    Forecast is illustrative only, not financial advice.
+  </footer>
+</div>
+
+<script>
+function linearForecast(rates, stepsAhead) {
+  const n = rates.length;
+  if (n < 2) return [];
+  const xs = rates.map((_, i) => i);
+  const meanX = xs.reduce((a,b)=>a+b,0) / n;
+  const meanY = rates.reduce((a,b)=>a+b,0) / n;
+  let num = 0, den = 0;
+  for (let i=0;i<n;i++){ num += (xs[i]-meanX)*(rates[i]-meanY); den += (xs[i]-meanX)**2; }
+  const slope = den === 0 ? 0 : num/den;
+  const intercept = meanY - slope*meanX;
+  const out = [];
+  for (let i=1;i<=stepsAhead;i++) out.push(intercept + slope*(n-1+i));
+  return out;
+}
+function addDays(dateStr, n) {
+  const d = new Date(dateStr + 'T00:00:00Z');
+  d.setUTCDate(d.getUTCDate()+n);
+  return d.toISOString().slice(0,10);
+}
+
+let chartInstance = null;
+function renderChart(readings) {
+  const labels = readings.map(r => r.date);
+  const rates = readings.map(r => r.rate);
+  const steps = 5;
+  const forecastVals = linearForecast(rates, steps);
+  const forecastLabels = [];
+  for (let i=1;i<=steps;i++) forecastLabels.push(addDays(labels[labels.length-1], i));
+
+  const allLabels = labels.concat(forecastLabels);
+  const actualSeries = rates.concat(new Array(steps).fill(null));
+  const forecastSeries = new Array(labels.length-1).fill(null).concat([rates[rates.length-1]]).concat(forecastVals);
+
+  Chart.defaults.color = '#444';
+  Chart.defaults.borderColor = '#ccc';
+  Chart.defaults.font.family = 'Arial, Helvetica, sans-serif';
+
+  const ctx = document.getElementById('rateChart');
+  if (chartInstance) chartInstance.destroy();
+  chartInstance = new Chart(ctx, {
+    type: 'line',
+    data: { labels: allLabels, datasets: [
+      { label: 'Recorded', data: actualSeries, borderColor: '#000', backgroundColor: 'rgba(0,0,0,0.03)', fill: true, pointRadius: labels.length < 30 ? 3 : 0, borderWidth: 1.5, tension: 0.1 },
+      { label: 'Forecast', data: forecastSeries, borderColor: '#a00', borderDash: [4,3], borderWidth: 1.5, pointRadius: 2, fill: false, tension: 0, spanGaps: true }
+    ]},
+    options: { responsive:true, plugins:{legend:{display:false}},
+      scales: { x:{ticks:{maxTicksLimit:10}}, y:{title:{display:true,text:'NGN per USD'}} } }
+  });
+}
+
+function updateStats(readings) {
+  if (readings.length === 0) return;
+  const current = readings[readings.length-1];
+  document.getElementById('currentRate').textContent = '\u20a6' + current.rate.toFixed(2);
+  document.getElementById('lastUpdated').textContent = current.date;
+
+  if (readings.length < 2) {
+    document.getElementById('avgRate').textContent = '\u2014';
+    document.getElementById('trendSignal').textContent = 'Need more data';
+    return;
+  }
+  const recent = readings.slice(-7).map(r=>r.rate);
+  const avg = recent.reduce((a,b)=>a+b,0)/recent.length;
+  document.getElementById('avgRate').textContent = '\u20a6' + avg.toFixed(2);
+  const el = document.getElementById('trendSignal');
+  if (current.rate > avg*1.005) { el.textContent = 'Rising'; el.className='up'; }
+  else if (current.rate < avg*0.995) { el.textContent = 'Falling'; el.className='down'; }
+  else { el.textContent = 'Stable'; el.className=''; }
+}
+
+async function load() {
+  const statusEl = document.getElementById('statusLine');
+  try {
+    const res = await fetch('/api/rate');
+    const data = await res.json();
+    if (data.error) {
+      statusEl.textContent = 'Note: last refresh attempt failed (' + data.error + '). Showing cached data.';
+      statusEl.className = 'error';
+    } else {
+      const hrs = data.next_refresh_in_hours.toFixed(1);
+      statusEl.textContent = 'Next server refresh in ' + hrs + ' hours. This page load used 0 API requests.';
+      statusEl.className = '';
+    }
+    if (data.readings && data.readings.length) {
+      updateStats(data.readings);
+      renderChart(data.readings);
+    } else {
+      statusEl.textContent = 'No data yet — waiting on first server fetch.';
+    }
+  } catch (e) {
+    statusEl.textContent = 'Could not reach the backend at /api/rate. Is app.py running?';
+    statusEl.className = 'error';
+  }
+}
+load();
+</script>
+</body>
+</html>
