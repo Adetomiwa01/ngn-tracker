@@ -101,9 +101,7 @@
 <body>
 <div class="wrap">
   <h1>NGN / USD Exchange Rate Tracker</h1>
-  <div class="sub">Data refreshed on a fixed schedule by the server. Reloading this page does not use additional API requests.</div>
-
-  <div id="statusLine">Loading...</div>
+  <div id="statusLine" style="display:none;"></div>
 
   <table class="data-table">
     <tr>
@@ -215,20 +213,19 @@ async function load() {
     if (data.error) {
       statusEl.textContent = 'Note: last refresh attempt failed (' + data.error + '). Showing cached data.';
       statusEl.className = 'error';
-    } else {
-      const hrs = data.next_refresh_in_hours.toFixed(1);
-      statusEl.textContent = 'Next server refresh in ' + hrs + ' hours. This page load used 0 API requests.';
-      statusEl.className = '';
+      statusEl.style.display = 'block';
     }
     if (data.readings && data.readings.length) {
       updateStats(data.readings);
       renderChart(data.readings);
     } else {
       statusEl.textContent = 'No data yet — waiting on first server fetch.';
+      statusEl.style.display = 'block';
     }
   } catch (e) {
     statusEl.textContent = 'Could not reach the backend at /api/rate. Is app.py running?';
     statusEl.className = 'error';
+    statusEl.style.display = 'block';
   }
 }
 load();
